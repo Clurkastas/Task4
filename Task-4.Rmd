@@ -1,0 +1,193 @@
+---
+title: "Task 4: "
+author: "Lucas Stark"
+date: "06 11 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = TRUE)
+library(tidyverse) #includes readr::read_fwf()
+library(knitr)
+library(kableExtra)
+library(data.table) #fread()
+library(scales)
+library(forecast)
+library(Metrics)
+```
+
+## Data Import
+
+```{r}
+url <- "http://ansatte.uit.no/oystein.myrland/data/storedata.csv"
+dat <- fread(url)
+dat <- dat %>%
+  mutate(Order_Date = as.Date(Order_Date),
+         year = lubridate::year(Order_Date),
+         month = lubridate::month(Order_Date))
+
+```
+
+# Task 1
+
+```{r}
+#1: For the last 3 months of 2017, calculate the total Sales by month, for Region 1 and Region 9 in the Customer_Segment, Corporate and Consumer. This output is Table 1.
+
+table1 <- dat %>%
+  filter(year==2017, month>=10, 
+         str_detect(Region, " 1$| 9$"),
+         str_detect(Customer_Segment, "Corporate|Consumer")) %>%
+  group_by(month, Region, Customer_Segment) %>%
+  summarise(TotalSales = sum(Sales))
+
+kable(table1, format = "html") %>%
+  kable_styling(c("striped", "bordered"))
+
+```
+
+# Task 2
+
+```{r}
+#2: Make a plot of the monthly total Sales in Region 1 and Region 13 in 2015, 2016 and 2017. This output is Figure 1.
+
+dat2 <- dat %>%
+  filter(year<=2017&year>=2015, 
+         str_detect(Region, " 1$| 13$")) %>%
+  group_by(year, month, Region) %>%
+  summarise(TotalSales = sum(Sales)) %>%
+  mutate(date = as.Date(lubridate::ymd(paste(year,month,01)))) 
+dat2 %>% 
+  ggplot(aes(x=date, y=TotalSales, col = Region)) +
+  geom_path(size = 1) +
+  scale_x_date(breaks = date_breaks("months"),
+  labels = date_format("%b '%y")) +
+  theme(axis.text.x = element_text(angle=70)) +
+  scale_y_continuous(labels = dollar, breaks = 1:9*10000) +
+  ggtitle("Monthly Sales in Regions 1 and 13")
+
+```
+
+# Task 3
+
+```{r}
+#3: In Figure 1, identify the months where the total Sales in Region 13 is greater than the total Sales in Region 1. This output is Table 2.
+
+dat2_1 <- dat2 %>%
+  filter(Region == "Region 1")
+dat2_13 <- dat2 %>%
+  filter(Region == "Region 13")
+table2 <- full_join(dat2_1, dat2_13, by="date") %>%
+  mutate(diff = TotalSales.y - TotalSales.x) %>%
+  filter(diff > 0) %>%
+  ungroup() %>%
+  select(date, diff) %>%
+  rename(Date = date)%>%
+  rename(`Difference in Sales` = diff)
+
+kable(table2, format = "html", caption = "Months when Sales are higher in R13 than R1") %>%
+  kable_styling(c("striped", "bordered"))
+
+```
+
+# Task 4
+
+```{r}
+#4: Find average Profit per Customer_Segment and Product_Category in 2017, for all regions except Region 3, 5 and 8. What segment produced the highest average profit? This output is Table 3.
+
+table3 <- dat %>%
+  filter(year==2017, 
+         str_detect(Region, " 3$| 5$| 8$", negate = TRUE)) %>%
+  group_by(Customer_Segment, Product_Category) %>%
+  summarise(`Mean of Sales` = round(mean(Sales),2)) %>%
+  arrange(-`Mean of Sales`)
+
+kable(table3, format = "html", caption = "Mean Sales per Customer_Segment and Product_Category") %>%
+  kable_styling(c("striped", "bordered"))
+
+```
+
+
+# Task 5
+
+```{r, include=FALSE}
+#5: You are asked to estimate a SARIMA model on the aggregated monthly Order_Quantity in the Customer_Segment; Small Business and Product_Category; Office Supplies. The SARIMA model contains the following parameters:...(see html)
+
+dat_prep <- dat %>%
+  filter(Customer_Segment == "Small Business") %>%
+  filter(Product_Category == "Office Supplies") %>%
+  mutate(date = as.Date(lubridate::ymd(paste(year,month,01)))) %>%
+  group_by(date) %>%
+  summarise(SumOrderQuan = sum(Order_Quantity)) %>%
+  mutate(month = lubridate::month(date),
+         year = lubridate::year(date)) %>%
+  ungroup()
+
+dat_estimate <- dat_prep %>%
+  filter(year<=2016&year>=2014)
+
+dat_predict <- dat_prep %>%
+  filter(year==2017)
+
+
+SumOrderQuan1416 <- ts(dat_estimate$SumOrderQuan, start=c(2014, 1), end=c(2016, 12), frequency=12)
+SumOrderQuan1416 %>% autoplot
+SumOrderQuan17 <- ts(dat_predict$SumOrderQuan, start=c(2017, 1), end=c(2017, 12), frequency=12)
+
+
+# do this? #test for one
+fit <- Arima(SumOrderQuan1416, order=c(1,1,0), seasonal=c(0,1,0))
+checkresiduals(fit) #yes that's a good start!
+#summary(fit)
+fit %>% forecast(h=12) %>% autoplot(xlab="Month", ylab="Ordered Quantity",
+    main="Ordered Quantity per Month")
+```
+
+
+```{r arima, include = FALSE}
+#preparing for mapping!
+d <- rep(rep(0:1, each = 1), length.out = 2500) 
+D <- rep(rep(0:1, each = 2), length.out = 2500) 
+p <- rep(rep(0:4, each = 4), length.out = 2500) 
+q <- rep(rep(0:4, each = 20), length.out = 2500) 
+P <- rep(rep(0:4, each = 100), length.out = 2500) 
+Q <- rep(rep(0:4, each = 500), length.out = 2500) 
+mappingDF <- cbind(p,d,q,P,D,Q)
+metalist <- list(p,d,q,P,D,Q)
+metalist_test <- list(p[2001:2010],d[2001:2010],q[2001:2010],
+                      P[2001:2010],D[2001:2010],Q[2001:2010])
+mappingDF[1,]
+
+#check if every line is unique!
+length(unique(mappingDF)[,1])
+#yes!
+
+
+mymapper <- as_mapper(~Arima(SumOrderQuan1416, 
+                            order=c(..1,..2,..3), 
+                            seasonal=c(..4,..5,..6),
+                            method="ML"))
+all2500models <- pmap(metalist_test, possibly(mymapper,NA))
+all2500summ <- map(all2500models, possibly(summary,NA))
+all2500RMSE <- map_dbl(all2500summ, ~.x[[2]])
+
+
+# best model?
+bestRMSE <- which.min(all2500RMSE)
+x <- mappingDF[bestRMSE,]
+bestModel <- Arima(SumOrderQuan1416, order=c(x[1],x[2],x[3]), seasonal=c(x[4],x[5],x[6]))
+
+p1 <- bestModel %>% forecast(h=12) %>% autoplot(xlab="Month", ylab="Ordered Quantity",
+    main="Ordered Quantity per Month with prediction for 2017")
+p2 <- p1 + geom_line(aes(x=dat_predict$month/12+2016+(11/12), y=dat_predict$SumOrderQuan),
+               color="yellow")
+
+```
+
+In the following chart the predictions from the best model is presented in blue color. The actual data is depicted in yellow. 
+
+```{r}
+p2
+```
+
